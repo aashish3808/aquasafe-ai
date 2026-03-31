@@ -1,77 +1,74 @@
 import streamlit as st
-import psycopg2
 import pandas as pd
 import os
-import vertexai
-from vertexai.generative_models import GenerativeModel
+import traceback
+from sqlalchemy import create_engine, text
+from google import genai
+from google.cloud import storage
 from dotenv import load_dotenv
 
-# Load environment variables from the .env file (for local runs)
 load_dotenv()
 
-PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "your-gcp-project-id")
-LOCATION = "us-central1"
+# --- Configuration ---
+API_KEY = os.getenv("GEMINI_API_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
+BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+# Initialize Clients
+genai_client = None
+storage_client = None
+engine = None
 
-# Using gemini-3-flash-preview for next-generation speed and budget-friendly reasoning
-model = GenerativeModel("gemini-3-flash-preview")
-
-DB_HOST = os.environ.get("ALLOYDB_IP", "127.0.0.1")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASS = os.environ.get("DB_PASS", "your_password")
-DB_NAME = os.environ.get("DB_NAME", "postgres")
+try:
+    if API_KEY:
+        genai_client = genai.Client(api_key=API_KEY)
+    
+    storage_client = storage.Client()
+    
+    if not DATABASE_URL:
+        st.error("DATABASE_URL is not set in environment variables.")
+    else:
+        # pool_pre_ping=True handles stale connections
+        engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+except Exception as e:
+    st.error(f"Initialization Error: {traceback.format_exc()}")
 
 def get_sql_from_natural_language(user_query: str) -> str:
-    schema_context = """
-    You are an expert PostgreSQL database engineer. 
-    Translate the user's natural language question into a valid PostgreSQL query.
-    
-    Schema:
-    CREATE TABLE water_tests (
-        sample_id SERIAL PRIMARY KEY, ph_level FLOAT, hardness FLOAT,
-        solids_tds FLOAT, chloramines FLOAT, sulfate FLOAT,
-        organic_carbon FLOAT, turbidity FLOAT, is_potable BOOLEAN 
-    );
-    
-    Rules:
-    1. Return ONLY the raw SQL code.
-    2. Do not include markdown formatting like ```sql.
-    3. Only query the `water_tests` table.
-    """
+    schema_context = "Table: water_tests (ph_level, hardness, solids_tds, chloramines, sulfate, organic_carbon, turbidity, is_potable). Rules: Return ONLY raw SQL, no markdown formatting."
     prompt = f"{schema_context}\n\nUser Question: {user_query}\nSQL Query:"
-    response = model.generate_content(prompt)
+    
+    response = genai_client.models.generate_content(
+        model="gemini-2.0-flash", 
+        contents=prompt
+    )
     return response.text.replace("```sql", "").replace("```", "").strip()
 
 def execute_query(sql_query: str):
     try:
-        conn = psycopg2.connect(host=DB_HOST, user=DB_USER, password=DB_PASS, dbname=DB_NAME)
-        df = pd.read_sql_query(sql_query, conn)
-        conn.close()
-        return df, None
-    except psycopg2.Error as e:
+        with engine.connect() as conn:
+            df = pd.read_sql(text(sql_query), conn)
+            return df, None
+    except Exception as e:
         return None, str(e)
 
 st.set_page_config(page_title="AquaSafe AI", page_icon="💧", layout="wide")
 st.title("💧 AquaSafe AI")
 st.subheader("Query public water safety records using plain English.")
 
-user_question = st.text_input("Ask a question about the water tests data:", placeholder="e.g., Show me 10 samples with the lowest hardness.")
+user_question = st.text_input("Ask about water quality (e.g., 'What is the average ph level?'):")
 
 if st.button("Analyze Data"):
-    if user_question:
-        with st.spinner("Translating English to SQL..."):
-            generated_sql = get_sql_from_natural_language(user_question)
+    if user_question and genai_client and engine:
+        with st.spinner("Analyzing..."):
+            sql = get_sql_from_natural_language(user_question)
+            st.info(f"Generated SQL: `{sql}`")
+            results, error = execute_query(sql)
             
-        st.info(f"**Generated SQL Query:**\n```sql\n{generated_sql}\n```")
-        
-        with st.spinner("Executing against AlloyDB..."):
-            results_df, error = execute_query(generated_sql)
-            
-        if error:
-            st.error(f"Database Execution Error: The AI generated invalid SQL.\n\nDetails: {error}")
-        elif results_df is not None and not results_df.empty:
-            st.success("Query executed successfully!")
-            st.dataframe(results_df, use_container_width=True)
-        else:
-            st.warning("Query executed successfully, but returned 0 results.")
+            if error:
+                st.error(f"Execution Error: {error}")
+            else:
+                st.success("Query successful!")
+                st.dataframe(results, use_container_width=True)
+    else:
+        st.warning("Ensure all configurations (API Key, DB Connection) are active.")
