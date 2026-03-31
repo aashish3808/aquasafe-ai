@@ -1,0 +1,5 @@
+ALLOYDB_IP="127.0.0.1"
+DB_USER="postgres"
+DB_PASS="your_password"
+DB_NAME="postgres"
+GOOGLE_CLOUD_PROJECT="your-project-id"
