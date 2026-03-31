@@ -1,4 +1,4 @@
-GEMINI_API_KEY="your-api-key"
-DATABASE_URL="postgresql://postgres:himagiri@200@172.19.0.2:5432/postgres"
-GCS_BUCKET_NAME="aquasafe-bucket"
-GOOGLE_CLOUD_PROJECT="genai-491909"
+GEMINI_API_KEY="API key"
+DATABASE_URL="postgresql://postgres:i<paassword>@<private IP>:5432/postgres"
+GCS_BUCKET_NAME="bucket-name"
+GOOGLE_CLOUD_PROJECT="your-project-id"
