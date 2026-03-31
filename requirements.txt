@@ -1,7 +1,7 @@
-streamlit==1.55.0
+streamlit>=1.55.0
 psycopg2-binary==2.9.9
 sqlalchemy==2.0.25
-pandas==3.0.1
+pandas>=2.2.0,<3.0.0
 google-cloud-aiplatform>=1.80.0
 google-cloud-storage>=2.14.0
 google-genai>=0.1.0
